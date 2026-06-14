@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <title>CLICK</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%230a0a0a'/%3E%3Ccircle cx='256' cy='150' r='54' fill='%23ff3b30'/%3E%3Ctext x='256' y='360' font-family='Arial,sans-serif' font-size='150' font-weight='700' fill='%23ffb000' text-anchor='middle'%3ECLK%3C/text%3E%3C/svg%3E" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0a; --panel: #161616; --line: #2a2a2a;
+      --amber: #ffb000; --red: #ff3b30; --dim: #6a6a6a; --text: #e8e8e8;
+      --display: "Oswald", system-ui, sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--display);
+      display: flex; flex-direction: column;
+      min-height: 100dvh; padding: env(safe-area-inset-top) 0 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #app { display: flex; flex-direction: column; flex: 1; max-width: 560px; width: 100%; margin: 0 auto; }
+
+    .song { display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line);cursor:pointer; }
+    .song.active { background:#1f1a0a; }
+    .song .nm { flex:1;font-size:18px; }
+    .song .meta { font-family:var(--mono);color:var(--dim);font-size:14px; }
+    .song button { background:none;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer; }
+    .empty { color:var(--dim);text-align:center;padding:40px 18px;font-size:16px; }
+    .addbar { display:flex;flex-wrap:wrap;gap:8px;padding:12px 18px;border-top:1px solid var(--line);align-items:center; }
+    .addbar input { background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px;font-family:var(--mono);font-size:14px; }
+    .addbar input[name=name]{flex:1;min-width:120px;}
+    .addbar input[type=number]{width:70px;}
+    .addbar .primary { background:var(--amber);color:#000;border:none;font-weight:700;border-radius:6px;padding:9px 14px;cursor:pointer;font-family:var(--display); }
+
+    .led { width:18px;height:18px;border-radius:50%;background:#222;border:1px solid var(--line);transition:background .04s; }
+    .led.on { background:var(--amber);box-shadow:0 0 10px var(--amber); }
+    .led.down.on { background:var(--red);box-shadow:0 0 12px var(--red); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;">
+      <strong style="letter-spacing:.18em;font-size:20px;">CLICK</strong>
+      <button id="wlToggle" style="background:none;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;">screen ○</button>
+    </header>
+    <main id="main" style="flex:1;display:flex;flex-direction:column;">
+      <section id="face" style="padding:8px 18px 16px;text-align:center;"></section>
+      <section id="setlist" style="flex:1;border-top:1px solid var(--line);overflow:auto;"></section>
+    </main>
+  </div>
+
+  <script>
+    "use strict";
+
+    // --- Storage: window.storage -> localStorage -> in-memory ---
+    const KEY = "clicklist_v1";
+    const store = (() => {
+      let mem = null;
+      const back = (() => {
+        try {
+          if (window.storage && typeof window.storage.getItem === "function") return window.storage;
+          if (window.localStorage) { window.localStorage.getItem(KEY); return window.localStorage; }
+        } catch (_) {}
+        return null;
+      })();
+      return {
+        get() {
+          try {
+            const raw = back ? back.getItem(KEY) : mem;
+            return raw ? JSON.parse(raw) : null;
+          } catch (_) { return null; }
+        },
+        set(obj) {
+          const raw = JSON.stringify(obj);
+          try { if (back) back.setItem(KEY, raw); else mem = raw; }
+          catch (_) { mem = raw; }
+        },
+      };
+    })();
+
+    // --- App state + helpers ---
+    const BPM_MIN = 20, BPM_MAX = 300;
+    const clampBpm = (n) => Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(n) || BPM_MIN));
+    const uid = () => "s" + Math.random().toString(36).slice(2, 9);
+    const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    const state = {
+      songs: [],        // [{ id, name, bpm, sig:{beats,unit} }]
+      currentId: null,
+      playing: false,
+    };
+
+    function load() {
+      const saved = store.get();
+      if (saved && Array.isArray(saved.songs)) {
+        state.songs = saved.songs.map((s) => ({
+          id: s.id || uid(),
+          name: String(s.name || "Untitled"),
+          bpm: clampBpm(s.bpm),
+          sig: { beats: (s.sig && s.sig.beats) || 4, unit: (s.sig && s.sig.unit) || 4 },
+        }));
+        state.currentId = saved.currentId || null;
+      }
+      if (state.currentId && !state.songs.some((s) => s.id === state.currentId)) {
+        state.currentId = null;
+      }
+    }
+
+    function save() {
+      store.set({ songs: state.songs, currentId: state.currentId });
+    }
+
+    function currentSong() {
+      return state.songs.find((s) => s.id === state.currentId) || null;
+    }
+
+    // --- Audio engine: look-ahead scheduler ---
+    const audio = {
+      ctx: null,
+      nextNoteTime: 0,   // audio-clock time of the next click
+      beat: 0,           // 0-based beat index within the current bar
+      lookahead: 25,     // ms — how often the scheduler runs
+      ahead: 0.1,        // s — how far ahead to schedule
+      timer: null,
+      queue: [],         // [{time, beat}] for the visual loop
+    };
+
+    function ensureCtx() {
+      if (!audio.ctx) audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.ctx.state === "suspended") audio.ctx.resume();
+      return audio.ctx;
+    }
+
+    function scheduleClick(time, beat) {
+      const ctx = audio.ctx;
+      const song = currentSong();
+      const beats = song ? song.sig.beats : 4;
+      const downbeat = beat % beats === 0;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = downbeat ? 1760 : 1108;
+      const peak = downbeat ? 0.9 : 0.5;
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime(peak, time + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.035);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(time);
+      osc.stop(time + 0.04);
+
+      audio.queue.push({ time, beat: beat % beats });
+    }
+
+    function scheduler() {
+      const ctx = audio.ctx;
+      const song = currentSong();
+      const bpm = song ? song.bpm : 120;
+      const beats = song ? song.sig.beats : 4;
+      const secondsPerBeat = 60 / bpm;
+      while (audio.nextNoteTime < ctx.currentTime + audio.ahead) {
+        scheduleClick(audio.nextNoteTime, audio.beat);
+        audio.nextNoteTime += secondsPerBeat;
+        audio.beat = (audio.beat + 1) % beats;
+      }
+    }
+
+    function startClick() {
+      const ctx = ensureCtx();
+      if (!currentSong()) return;
+      audio.beat = 0;
+      audio.nextNoteTime = ctx.currentTime + 0.06;
+      audio.queue.length = 0;
+      state.playing = true;
+      audio.timer = setInterval(scheduler, audio.lookahead);
+      startVisualLoop();
+      acquireWakeLock();
+      renderFace();
+    }
+
+    function stopClick() {
+      clearInterval(audio.timer);
+      audio.timer = null;
+      state.playing = false;
+      audio.queue.length = 0;
+      releaseWakeLock();
+      renderFace();
+    }
+
+    function toggleClick() { state.playing ? stopClick() : startClick(); }
+
+    // --- Visual sync loop (driven by the audio clock) ---
+    let rafId = null;
+    function startVisualLoop() {
+      cancelAnimationFrame(rafId);
+      const tick = () => {
+        if (!state.playing) return;
+        const now = audio.ctx.currentTime;
+        while (audio.queue.length && audio.queue[0].time <= now) {
+          lightBeat(audio.queue.shift().beat);
+        }
+        rafId = requestAnimationFrame(tick);
+      };
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function lightBeat(beat) {
+      const leds = document.querySelectorAll("#leds .led");
+      leds.forEach((l) => l.classList.remove("on"));
+      const led = leds[beat];
+      if (led) {
+        led.classList.add("on");
+        setTimeout(() => led.classList.remove("on"), 90);
+      }
+      const readout = document.getElementById("bpmreadout");
+      if (readout) {
+        readout.style.transform = "scale(1.06)";
+        setTimeout(() => { readout.style.transform = "scale(1)"; }, 80);
+      }
+    }
+
+    // --- Metronome face ---
+    const $face = document.getElementById("face");
+    function renderFace() {
+      const s = currentSong();
+      const bpm = s ? s.bpm : "--";
+      const name = s ? escapeHtml(s.name) : "No song selected";
+      $face.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;gap:14px;">
+          <button id="dn" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;width:44px;height:44px;font-size:24px;cursor:pointer;">–</button>
+          <div id="bpmreadout" style="font-family:var(--mono);font-size:64px;line-height:1;color:var(--amber);font-weight:700;transition:transform .05s;">${bpm}</div>
+          <button id="up" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;width:44px;height:44px;font-size:24px;cursor:pointer;">+</button>
+        </div>
+        <div style="color:var(--dim);font-size:13px;letter-spacing:.1em;">BPM</div>
+        <div style="margin:8px 0 12px;font-size:20px;">${name}</div>
+        <div id="leds" style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;min-height:18px;"></div>
+        <button id="startstop" style="background:${state.playing ? 'var(--red)' : 'var(--amber)'};color:#000;border:none;border-radius:10px;padding:14px 40px;font-family:var(--display);font-weight:700;font-size:22px;cursor:pointer;">
+          ${state.playing ? "STOP" : "START"}
+        </button>
+        <button id="tap" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:14px 24px;margin-left:10px;font-family:var(--display);font-weight:700;font-size:18px;cursor:pointer;">TAP</button>`;
+      document.getElementById("startstop").addEventListener("click", toggleClick);
+      const dn = document.getElementById("dn"), up = document.getElementById("up");
+      if (dn) dn.addEventListener("click", () => nudge(-1));
+      if (up) up.addEventListener("click", () => nudge(+1));
+      const tap = document.getElementById("tap");
+      if (tap) tap.addEventListener("click", tapTempo);
+      renderLeds();
+    }
+
+    function renderLeds() {
+      const s = currentSong();
+      const beats = s ? s.sig.beats : 4;
+      const el = document.getElementById("leds");
+      if (!el) return;
+      el.innerHTML = Array.from({ length: beats }, (_, i) =>
+        `<div class="led${i === 0 ? " down" : ""}" data-i="${i}"></div>`).join("");
+    }
+
+    // --- Setlist ---
+    const $setlist = document.getElementById("setlist");
+    let editingId = null; // id being edited, or null = add mode
+
+    function renderSetlist() {
+      const rows = state.songs.map((s) => {
+        const active = s.id === state.currentId ? " active" : "";
+        return `<div class="song${active}" data-id="${s.id}">
+          <span class="nm">${escapeHtml(s.name)}</span>
+          <span class="meta">${s.bpm} · ${s.sig.beats}/${s.sig.unit}</span>
+          <button data-act="up" data-id="${s.id}" title="Move up">▲</button>
+          <button data-act="edit" data-id="${s.id}">Edit</button>
+          <button data-act="del" data-id="${s.id}">✕</button>
+        </div>`;
+      }).join("");
+
+      const list = state.songs.length
+        ? rows
+        : `<div class="empty">No songs yet.<br>Add your first song below.</div>`;
+
+      const ed = editingId ? state.songs.find((s) => s.id === editingId) : null;
+      const form = `<div class="addbar">
+        <input name="name" placeholder="Song name" value="${ed ? escapeHtml(ed.name) : ""}" />
+        <input type="number" name="bpm" min="${BPM_MIN}" max="${BPM_MAX}" placeholder="BPM" value="${ed ? ed.bpm : ""}" />
+        <input type="number" name="beats" min="1" max="16" placeholder="beats" value="${ed ? ed.sig.beats : 4}" />
+        <input type="number" name="unit" min="1" max="16" placeholder="unit" value="${ed ? ed.sig.unit : 4}" />
+        <button class="primary" data-act="save">${ed ? "Save" : "Add"}</button>
+      </div>`;
+
+      $setlist.innerHTML = list + form;
+    }
+
+    function readForm() {
+      const q = (n) => $setlist.querySelector(`[name=${n}]`);
+      const name = (q("name").value || "").trim();
+      const bpm = clampBpm(Number(q("bpm").value));
+      const beats = Math.max(1, Math.min(16, Number(q("beats").value) || 4));
+      const unit = Math.max(1, Math.min(16, Number(q("unit").value) || 4));
+      if (!name) return null;
+      return { name, bpm, sig: { beats, unit } };
+    }
+
+    $setlist.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      const row = e.target.closest(".song");
+      if (btn) {
+        const act = btn.dataset.act, id = btn.dataset.id;
+        if (act === "save") return onSave();
+        if (act === "edit") { editingId = id; renderSetlist(); return; }
+        if (act === "del") return onDelete(id);
+        if (act === "up") return onMoveUp(id);
+        return;
+      }
+      if (row) selectSong(row.dataset.id);
+    });
+
+    function onSave() {
+      const data = readForm();
+      if (!data) return;
+      if (editingId) {
+        const s = state.songs.find((x) => x.id === editingId);
+        if (s) Object.assign(s, data);
+        editingId = null;
+      } else {
+        const s = { id: uid(), ...data };
+        state.songs.push(s);
+        if (!state.currentId) selectSong(s.id);
+      }
+      save(); renderAll();
+    }
+
+    function onDelete(id) {
+      const i = state.songs.findIndex((s) => s.id === id);
+      if (i < 0) return;
+      state.songs.splice(i, 1);
+      if (state.currentId === id) {
+        const next = state.songs[i] || state.songs[i - 1] || null;
+        selectSong(next ? next.id : null);
+      }
+      if (editingId === id) editingId = null;
+      save(); renderAll();
+    }
+
+    function onMoveUp(id) {
+      const i = state.songs.findIndex((s) => s.id === id);
+      if (i > 0) {
+        [state.songs[i - 1], state.songs[i]] = [state.songs[i], state.songs[i - 1]];
+        save(); renderAll();
+      }
+    }
+
+    function selectSong(id) {
+      state.currentId = id;
+      save();
+      // If playing, keep the clock running: the scheduler reads bpm/beats live,
+      // so the next scheduled beat already uses the new song. Just clamp the
+      // beat index so an accent doesn't land out of range for a shorter bar.
+      const s = currentSong();
+      if (state.playing && s) audio.beat = audio.beat % s.sig.beats;
+      renderAll();
+    }
+
+    function nudge(delta) {
+      const s = currentSong();
+      if (!s) return;
+      s.bpm = clampBpm(s.bpm + delta);
+      save();
+      renderFace();
+    }
+
+    function renderAll() { renderFace(); renderSetlist(); }
+
+    // --- Tap tempo ---
+    const tapTimes = [];
+    function tapTempo() {
+      const now = performance.now();
+      if (tapTimes.length && now - tapTimes[tapTimes.length - 1] > 2000) {
+        tapTimes.length = 0; // stale — restart
+      }
+      tapTimes.push(now);
+      if (tapTimes.length > 5) tapTimes.shift();
+      if (tapTimes.length >= 2) {
+        let sum = 0;
+        for (let i = 1; i < tapTimes.length; i++) sum += tapTimes[i] - tapTimes[i - 1];
+        const avgMs = sum / (tapTimes.length - 1);
+        const bpm = clampBpm(60000 / avgMs);
+        const s = currentSong();
+        if (s) { s.bpm = bpm; save(); renderFace(); }
+      }
+    }
+
+    // --- Wake Lock ---
+    let wakeLock = null;
+    let wakeWanted = false; // user/playing intent
+
+    async function acquireWakeLock() {
+      wakeWanted = true;
+      if ("wakeLock" in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request("screen");
+          wakeLock.addEventListener("release", () => { wakeLock = null; renderWl(); });
+        } catch (_) { /* unsupported or denied: silent */ }
+      }
+      renderWl();
+    }
+
+    function releaseWakeLock() {
+      wakeWanted = false;
+      if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+      renderWl();
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && wakeWanted && !wakeLock) {
+        acquireWakeLock();
+      }
+    });
+
+    const $wl = document.getElementById("wlToggle");
+    function renderWl() {
+      if (!$wl) return;
+      const on = !!wakeLock || wakeWanted;
+      $wl.style.color = on ? "var(--amber)" : "var(--dim)";
+      $wl.textContent = on ? "screen ●" : "screen ○";
+    }
+    $wl.addEventListener("click", async () => {
+      if (wakeWanted) releaseWakeLock(); else await acquireWakeLock();
+    });
+
+    // --- Keyboard shortcuts ---
+    document.addEventListener("keydown", (e) => {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return; // typing
+      const idx = () => state.songs.findIndex((s) => s.id === state.currentId);
+      switch (e.key) {
+        case " ": e.preventDefault(); toggleClick(); break;
+        case "ArrowRight": {
+          const i = idx(); if (i > -1 && i < state.songs.length - 1) selectSong(state.songs[i + 1].id);
+          break;
+        }
+        case "ArrowLeft": {
+          const i = idx(); if (i > 0) selectSong(state.songs[i - 1].id);
+          break;
+        }
+        case "ArrowUp": e.preventDefault(); nudge(+1); break;
+        case "ArrowDown": e.preventDefault(); nudge(-1); break;
+        case "t": case "T": tapTempo(); break;
+      }
+    });
+
+    // --- Service worker registration (https/localhost only; no-op on file://) ---
+    if ("serviceWorker" in navigator && location.protocol !== "file:") {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      });
+    }
+
+    // --- Init ---
+    load();
+    renderAll();
+    renderWl();
+  </script>
+</body>
+</html>
