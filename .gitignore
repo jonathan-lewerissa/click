@@ -1,0 +1,3 @@
+# Playwright MCP verification artifacts
+.playwright-mcp/
+click-refresh.png

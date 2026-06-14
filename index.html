@@ -12,8 +12,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0a0a0a; --panel: #161616; --line: #2a2a2a;
-      --amber: #ffb000; --red: #ff3b30; --dim: #6a6a6a; --text: #e8e8e8;
+      --bg: #0a0a0a; --panel: #1a1a1a; --line: #2a2a2a; --border: #333;
+      --amber: #ffb000; --amber-dim: #4a3500; --red: #ff3b30; --red-dim: #4a0000;
+      --dim: #888; --text: #f0f0f0;
       --display: "Oswald", system-ui, sans-serif;
       --mono: "JetBrains Mono", ui-monospace, monospace;
     }
@@ -25,24 +26,45 @@
       display: flex; flex-direction: column;
       min-height: 100dvh; padding: env(safe-area-inset-top) 0 0;
       -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: contain;
     }
     #app { display: flex; flex-direction: column; flex: 1; max-width: 560px; width: 100%; margin: 0 auto; }
 
-    .song { display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line);cursor:pointer; }
-    .song.active { background:#1f1a0a; }
-    .song .nm { flex:1;font-size:18px; }
-    .song .meta { font-family:var(--mono);color:var(--dim);font-size:14px; }
-    .song button { background:none;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer; }
-    .empty { color:var(--dim);text-align:center;padding:40px 18px;font-size:16px; }
-    .addbar { display:flex;flex-wrap:wrap;gap:8px;padding:12px 18px;border-top:1px solid var(--line);align-items:center; }
-    .addbar input { background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px;font-family:var(--mono);font-size:14px; }
-    .addbar input[name=name]{flex:1;min-width:120px;}
-    .addbar input[type=number]{width:70px;}
-    .addbar .primary { background:var(--amber);color:#000;border:none;font-weight:700;border-radius:6px;padding:9px 14px;cursor:pointer;font-family:var(--display); }
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; }
 
-    .led { width:18px;height:18px;border-radius:50%;background:#222;border:1px solid var(--line);transition:background .04s; }
-    .led.on { background:var(--amber);box-shadow:0 0 10px var(--amber); }
-    .led.down.on { background:var(--red);box-shadow:0 0 12px var(--red); }
+    /* Metronome display */
+    .display { padding:24px 16px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
+    .now-playing { font-size:1.5rem; color:var(--text); min-height:2rem; }
+    .bpm-row { display:flex; align-items:center; justify-content:center; gap:16px; }
+    .bpm-readout { font-family:var(--mono); font-size:96px; line-height:1; color:var(--amber); font-weight:700; text-shadow:0 0 20px rgba(255,176,0,.2); transition:transform .05s; }
+    .nudge { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; width:48px; height:48px; font-size:26px; cursor:pointer; }
+    .sig { font-family:var(--mono); font-size:1.4rem; color:var(--dim); }
+    #leds { display:flex; gap:14px; justify-content:center; min-height:24px; margin-top:6px; }
+    .led { width:24px; height:24px; border-radius:50%; background:var(--amber-dim); box-shadow:inset 0 2px 4px rgba(0,0,0,.5); transition:background-color .05s, box-shadow .05s; }
+    .led.down { background:var(--red-dim); }
+    .led.on { background:var(--amber); box-shadow:0 0 15px var(--amber); }
+    .led.down.on { background:var(--red); box-shadow:0 0 15px var(--red); }
+
+    /* Transport controls */
+    .controls { display:grid; grid-template-columns:1fr; gap:10px; }
+    .btn-play { background:var(--amber); color:#000; border:none; border-radius:10px; padding:16px; font-family:var(--display); font-weight:700; font-size:24px; text-transform:uppercase; letter-spacing:1px; cursor:pointer; }
+    .btn-play.playing { background:var(--red); color:#fff; }
+    .btn-tap { background:#333; color:var(--text); border:none; border-radius:10px; padding:13px; font-family:var(--display); font-weight:600; font-size:17px; text-transform:uppercase; letter-spacing:1px; cursor:pointer; }
+    button:active { opacity:.85; }
+
+    /* Setlist */
+    .setlist-title { font-size:1.1rem; color:var(--dim); letter-spacing:1px; margin-bottom:12px; }
+    .song { display:flex; align-items:center; gap:10px; padding:12px 14px; background:var(--bg); margin-bottom:8px; border-radius:6px; border-left:4px solid transparent; cursor:pointer; }
+    .song.active { border-left-color:var(--amber); background:#222; }
+    .song .nm { flex:1; font-size:18px; }
+    .song .meta { font-family:var(--mono); color:var(--dim); font-size:14px; }
+    .song button { background:none; border:1px solid var(--border); color:var(--dim); border-radius:6px; padding:4px 8px; font-size:13px; cursor:pointer; }
+    .empty { color:var(--dim); text-align:center; padding:40px 18px; font-size:16px; }
+    .addbar { display:flex; flex-wrap:wrap; gap:8px; padding:14px 0 4px; margin-top:10px; border-top:1px dashed var(--border); align-items:center; }
+    .addbar input { background:var(--bg); border:1px solid #444; color:var(--text); border-radius:6px; padding:8px; font-family:var(--mono); font-size:14px; }
+    .addbar input[name=name]{ flex:1; min-width:120px; }
+    .addbar input[type=number]{ width:64px; }
+    .addbar .primary { background:#444; color:#fff; border:none; font-weight:700; border-radius:6px; padding:9px 14px; cursor:pointer; font-family:var(--display); }
   </style>
 </head>
 <body>
@@ -51,9 +73,9 @@
       <strong style="letter-spacing:.18em;font-size:20px;">CLICK</strong>
       <button id="wlToggle" style="background:none;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;">screen ○</button>
     </header>
-    <main id="main" style="flex:1;display:flex;flex-direction:column;">
-      <section id="face" style="padding:8px 18px 16px;text-align:center;"></section>
-      <section id="setlist" style="flex:1;border-top:1px solid var(--line);overflow:auto;"></section>
+    <main id="main" style="flex:1;display:flex;flex-direction:column;gap:18px;padding:16px 18px;">
+      <section id="face"></section>
+      <section id="setlist" class="panel" style="flex:1;overflow:auto;padding:16px;"></section>
     </main>
   </div>
 
@@ -234,19 +256,22 @@
       const s = currentSong();
       const bpm = s ? s.bpm : "--";
       const name = s ? escapeHtml(s.name) : "No song selected";
+      const sig = s ? `${s.sig.beats} / ${s.sig.unit}` : "– / –";
       $face.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:center;gap:14px;">
-          <button id="dn" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;width:44px;height:44px;font-size:24px;cursor:pointer;">–</button>
-          <div id="bpmreadout" style="font-family:var(--mono);font-size:64px;line-height:1;color:var(--amber);font-weight:700;transition:transform .05s;">${bpm}</div>
-          <button id="up" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;width:44px;height:44px;font-size:24px;cursor:pointer;">+</button>
+        <div class="display panel">
+          <div class="now-playing">${name}</div>
+          <div class="bpm-row">
+            <button id="dn" class="nudge" aria-label="Decrease tempo">–</button>
+            <div id="bpmreadout" class="bpm-readout">${bpm}</div>
+            <button id="up" class="nudge" aria-label="Increase tempo">+</button>
+          </div>
+          <div class="sig">${sig}</div>
+          <div id="leds"></div>
         </div>
-        <div style="color:var(--dim);font-size:13px;letter-spacing:.1em;">BPM</div>
-        <div style="margin:8px 0 12px;font-size:20px;">${name}</div>
-        <div id="leds" style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;min-height:18px;"></div>
-        <button id="startstop" style="background:${state.playing ? 'var(--red)' : 'var(--amber)'};color:#000;border:none;border-radius:10px;padding:14px 40px;font-family:var(--display);font-weight:700;font-size:22px;cursor:pointer;">
-          ${state.playing ? "STOP" : "START"}
-        </button>
-        <button id="tap" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:14px 24px;margin-left:10px;font-family:var(--display);font-weight:700;font-size:18px;cursor:pointer;">TAP</button>`;
+        <div class="controls">
+          <button id="startstop" class="btn-play${state.playing ? " playing" : ""}">${state.playing ? "STOP" : "START"}</button>
+          <button id="tap" class="btn-tap">TAP</button>
+        </div>`;
       document.getElementById("startstop").addEventListener("click", toggleClick);
       const dn = document.getElementById("dn"), up = document.getElementById("up");
       if (dn) dn.addEventListener("click", () => nudge(-1));
@@ -294,7 +319,7 @@
         <button class="primary" data-act="save">${ed ? "Save" : "Add"}</button>
       </div>`;
 
-      $setlist.innerHTML = list + form;
+      $setlist.innerHTML = `<div class="setlist-title">SETLIST</div>` + list + form;
     }
 
     function readForm() {
