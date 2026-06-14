@@ -1,3 +1,10 @@
 # Playwright MCP verification artifacts
 .playwright-mcp/
 click-refresh.png
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
