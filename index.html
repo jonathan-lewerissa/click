@@ -36,14 +36,23 @@
     .display { padding:24px 16px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
     .now-playing { font-size:1.5rem; color:var(--text); min-height:2rem; }
     .bpm-row { display:flex; align-items:center; justify-content:center; gap:16px; }
-    .bpm-readout { font-family:var(--mono); font-size:96px; line-height:1; color:var(--amber); font-weight:700; text-shadow:0 0 20px rgba(255,176,0,.2); transition:transform .05s; }
+    .bpm-readout { font-family:var(--mono); font-size:96px; line-height:1; color:var(--amber); font-weight:700; text-shadow:0 0 20px rgba(255,176,0,.2); transition:transform .05s; cursor:pointer; }
     .nudge { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; width:48px; height:48px; font-size:26px; cursor:pointer; }
     .sig { font-family:var(--mono); font-size:1.4rem; color:var(--dim); }
+    #subbtn, #voicebtn, .opts button { background:none; border:1px solid #444; color:var(--dim); border-radius:6px; padding:2px 10px; font-family:var(--mono); font-size:1rem; cursor:pointer; }
+    .opts { display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; }
+    .opts input[type=range] { width:90px; accent-color:var(--amber); }
+    #bpmedit { width:200px; background:none; border:none; border-bottom:2px solid var(--amber); color:var(--amber); font-family:var(--mono); font-size:72px; font-weight:700; text-align:center; outline:none; }
+    #bpmedit::-webkit-outer-spin-button, #bpmedit::-webkit-inner-spin-button { -webkit-appearance:none; }
+    #flashoverlay { position:fixed; inset:0; background:var(--red); opacity:0; pointer-events:none; }
+    #flashoverlay.show { opacity:.3; }
     #leds { display:flex; gap:14px; justify-content:center; min-height:24px; margin-top:6px; }
-    .led { width:24px; height:24px; border-radius:50%; background:var(--amber-dim); box-shadow:inset 0 2px 4px rgba(0,0,0,.5); transition:background-color .05s, box-shadow .05s; }
+    .led { width:24px; height:24px; border-radius:50%; background:var(--amber-dim); box-shadow:inset 0 2px 4px rgba(0,0,0,.5); transition:background-color .05s, box-shadow .05s; cursor:pointer; }
     .led.down { background:var(--red-dim); }
+    .led.mute { background:transparent; border:1px solid #444; box-shadow:none; }
     .led.on { background:var(--amber); box-shadow:0 0 15px var(--amber); }
     .led.down.on { background:var(--red); box-shadow:0 0 15px var(--red); }
+    .led.on.count { background:#e8e8e8; box-shadow:0 0 15px #fff; }
 
     /* Transport controls */
     .controls { display:grid; grid-template-columns:1fr; gap:10px; }
@@ -63,21 +72,21 @@
     .addbar { display:flex; flex-wrap:wrap; gap:8px; padding:14px 0 4px; margin-top:10px; border-top:1px dashed var(--border); align-items:center; }
     .addbar input { background:var(--bg); border:1px solid #444; color:var(--text); border-radius:6px; padding:8px; font-family:var(--mono); font-size:14px; }
     .addbar input[name=name]{ flex:1; min-width:120px; }
-    .addbar input[type=number]{ width:64px; }
+    .addbar input[type=number], .addbar input[name=sig]{ width:64px; }
     .addbar .primary { background:#444; color:#fff; border:none; font-weight:700; border-radius:6px; padding:9px 14px; cursor:pointer; font-family:var(--display); }
   </style>
 </head>
 <body>
   <div id="app">
-    <header style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;">
-      <strong style="letter-spacing:.18em;font-size:20px;">CLICK</strong>
-      <button id="wlToggle" style="background:none;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;">screen ○</button>
+    <header style="display:flex;justify-content:flex-end;padding:14px 18px 0;">
+      <button id="wlToggle" title="Keep screen awake" style="background:none;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;">screen ○</button>
     </header>
     <main id="main" style="flex:1;display:flex;flex-direction:column;gap:18px;padding:16px 18px;">
       <section id="face"></section>
       <section id="setlist" class="panel" style="flex:1;overflow:auto;padding:16px;"></section>
     </main>
   </div>
+  <div id="flashoverlay"></div>
 
   <script>
     "use strict";
@@ -115,10 +124,35 @@
     const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+    // Normalize a song's per-beat/per-song settings.
+    // Accent levels: 0 = mute, 1 = normal, 2 = accent. Resize keeps existing
+    // values; new beats default to normal, beat 1 to accent.
+    function fixSong(s) {
+      const old = Array.isArray(s.accents) ? s.accents : [];
+      s.accents = Array.from({ length: s.sig.beats }, (_, i) =>
+        [0, 1, 2].includes(old[i]) ? old[i] : (i === 0 ? 2 : 1));
+      if (![1, 2, 3, 4].includes(s.sub)) s.sub = 1;
+      if (typeof s.voice !== "boolean") s.voice = false;
+      return s;
+    }
+
+    // Click sound presets: freqs per accent level, decay, loudness trim per waveform.
+    const SOUNDS = {
+      beep: { type: "triangle", down: 1760, beat: 1108, sub: 740,  decay: 0.035, mul: 1 },
+      wood: { type: "square",   down: 2093, beat: 1568, sub: 1047, decay: 0.018, mul: 0.5 },
+      low:  { type: "sine",     down: 880,  beat: 659,  sub: 523,  decay: 0.05,  mul: 1.2 },
+    };
+
     const state = {
-      songs: [],        // [{ id, name, bpm, sig:{beats,unit} }]
+      songs: [],        // [{ id, name, bpm, sig:{beats,unit}, accents:[0|1|2] }]
       currentId: null,
       playing: false,
+      sub: 1,           // clicks per beat: 1, 2 (8ths), 3 (triplets), 4 (16ths)
+      voice: false,     // speak the beat count out loud
+      sound: "beep",    // key into SOUNDS
+      vol: 1,           // master volume 0..1
+      flash: false,     // flash the screen on beat 1
+      count: false,     // one-bar count-in before starting
     };
 
     function load() {
@@ -129,8 +163,19 @@
           name: String(s.name || "Untitled"),
           bpm: clampBpm(s.bpm),
           sig: { beats: (s.sig && s.sig.beats) || 4, unit: (s.sig && s.sig.unit) || 4 },
-        }));
+          accents: s.accents,
+          sub: s.sub,
+          voice: s.voice,
+        })).map(fixSong);
         state.currentId = saved.currentId || null;
+      }
+      if (saved && [1, 2, 3, 4].includes(saved.sub)) state.sub = saved.sub;
+      if (saved) {
+        state.voice = saved.voice === true;
+        if (SOUNDS[saved.sound]) state.sound = saved.sound;
+        if (typeof saved.vol === "number") state.vol = Math.max(0, Math.min(1, saved.vol));
+        state.flash = saved.flash === true;
+        state.count = saved.count === true;
       }
       if (state.currentId && !state.songs.some((s) => s.id === state.currentId)) {
         state.currentId = null;
@@ -138,7 +183,10 @@
     }
 
     function save() {
-      store.set({ songs: state.songs, currentId: state.currentId });
+      store.set({
+        songs: state.songs, currentId: state.currentId, sub: state.sub, voice: state.voice,
+        sound: state.sound, vol: state.vol, flash: state.flash, count: state.count,
+      });
     }
 
     function currentSong() {
@@ -148,39 +196,57 @@
     // --- Audio engine: look-ahead scheduler ---
     const audio = {
       ctx: null,
+      master: null,      // master GainNode (volume)
       nextNoteTime: 0,   // audio-clock time of the next click
       beat: 0,           // 0-based beat index within the current bar
+      subTick: 0,        // 0-based sub-click index within the current beat
+      countLeft: 0,      // count-in beats remaining before the song starts
       lookahead: 25,     // ms — how often the scheduler runs
-      ahead: 0.1,        // s — how far ahead to schedule
+      ahead: 0.2,        // s — how far ahead to schedule (survives mobile timer throttling)
       timer: null,
       queue: [],         // [{time, beat}] for the visual loop
     };
 
     function ensureCtx() {
-      if (!audio.ctx) audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (!audio.ctx) {
+        audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        audio.master = audio.ctx.createGain();
+        audio.master.connect(audio.ctx.destination);
+      }
+      audio.master.gain.value = state.vol;
       if (audio.ctx.state === "suspended") audio.ctx.resume();
       return audio.ctx;
     }
 
-    function scheduleClick(time, beat) {
+    function scheduleClick(time, beat, isBeat, countIn) {
       const ctx = audio.ctx;
       const song = currentSong();
       const beats = song ? song.sig.beats : 4;
-      const downbeat = beat % beats === 0;
+      // Count-in ignores per-beat accents/mutes: plain bar, accented downbeat.
+      const level = countIn || !song
+        ? (beat % beats === 0 ? 2 : 1)
+        : song.accents[beat % beats];
+      const downbeat = isBeat && level === 2;
 
+      if (isBeat && level === 0) { // muted beat: visual pulse only, no click
+        audio.queue.push({ time, beat: beat % beats });
+        return;
+      }
+
+      const snd = SOUNDS[state.sound] || SOUNDS.beep;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = "triangle";
-      osc.frequency.value = downbeat ? 1760 : 1108;
-      const peak = downbeat ? 0.9 : 0.5;
+      osc.type = snd.type;
+      osc.frequency.value = downbeat ? snd.down : isBeat ? snd.beat : snd.sub;
+      const peak = (downbeat ? 0.9 : isBeat ? 0.5 : 0.22) * snd.mul;
       gain.gain.setValueAtTime(0.0001, time);
       gain.gain.exponentialRampToValueAtTime(peak, time + 0.002);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.035);
-      osc.connect(gain).connect(ctx.destination);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + snd.decay);
+      osc.connect(gain).connect(audio.master);
       osc.start(time);
-      osc.stop(time + 0.04);
+      osc.stop(time + snd.decay + 0.01);
 
-      audio.queue.push({ time, beat: beat % beats });
+      if (isBeat) audio.queue.push({ time, beat: beat % beats, count: countIn });
     }
 
     function scheduler() {
@@ -189,10 +255,28 @@
       const bpm = song ? song.bpm : 120;
       const beats = song ? song.sig.beats : 4;
       const secondsPerBeat = 60 / bpm;
+      const sub = song ? song.sub : state.sub;
+      // Timer got throttled and we fell behind: re-anchor to now rather than
+      // firing every missed click at once in a burst.
+      if (audio.nextNoteTime < ctx.currentTime) {
+        audio.nextNoteTime = ctx.currentTime + 0.05;
+      }
       while (audio.nextNoteTime < ctx.currentTime + audio.ahead) {
-        scheduleClick(audio.nextNoteTime, audio.beat);
-        audio.nextNoteTime += secondsPerBeat;
-        audio.beat = (audio.beat + 1) % beats;
+        if (audio.countLeft > 0) { // count-in: whole beats only, no subdivisions
+          scheduleClick(audio.nextNoteTime, audio.beat, true, true);
+          audio.nextNoteTime += secondsPerBeat;
+          audio.beat++;
+          audio.countLeft--;
+          if (audio.countLeft === 0) audio.beat = 0;
+          continue;
+        }
+        scheduleClick(audio.nextNoteTime, audio.beat, audio.subTick === 0);
+        audio.nextNoteTime += secondsPerBeat / sub;
+        audio.subTick++;
+        if (audio.subTick >= sub) {
+          audio.subTick = 0;
+          audio.beat = (audio.beat + 1) % beats;
+        }
       }
     }
 
@@ -200,6 +284,8 @@
       const ctx = ensureCtx();
       if (!currentSong()) return;
       audio.beat = 0;
+      audio.subTick = 0;
+      audio.countLeft = state.count ? currentSong().sig.beats : 0;
       audio.nextNoteTime = ctx.currentTime + 0.06;
       audio.queue.length = 0;
       state.playing = true;
@@ -228,20 +314,37 @@
         if (!state.playing) return;
         const now = audio.ctx.currentTime;
         while (audio.queue.length && audio.queue[0].time <= now) {
-          lightBeat(audio.queue.shift().beat);
+          const q = audio.queue.shift();
+          lightBeat(q.beat, q.count);
         }
         rafId = requestAnimationFrame(tick);
       };
       rafId = requestAnimationFrame(tick);
     }
 
-    function lightBeat(beat) {
+    const COUNT_WORDS = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen".split(" ");
+    function speakCount(beat) {
+      if (!("speechSynthesis" in window)) return;
+      speechSynthesis.cancel(); // drop an unfinished word rather than queueing behind it
+      const u = new SpeechSynthesisUtterance(COUNT_WORDS[beat] || String(beat + 1));
+      u.rate = 1.5; // keep short words inside the beat at higher tempos
+      speechSynthesis.speak(u);
+    }
+
+    function lightBeat(beat, isCount) {
+      if ((currentSong() || state).voice) speakCount(beat);
       const leds = document.querySelectorAll("#leds .led");
-      leds.forEach((l) => l.classList.remove("on"));
+      leds.forEach((l) => l.classList.remove("on", "count"));
       const led = leds[beat];
       if (led) {
         led.classList.add("on");
-        setTimeout(() => led.classList.remove("on"), 90);
+        if (isCount) led.classList.add("count"); // count-in flashes white
+        setTimeout(() => led.classList.remove("on", "count"), 90);
+      }
+      if (state.flash && beat === 0) {
+        const f = document.getElementById("flashoverlay");
+        f.classList.add("show");
+        setTimeout(() => f.classList.remove("show"), 90);
       }
       const readout = document.getElementById("bpmreadout");
       if (readout) {
@@ -265,7 +368,13 @@
             <div id="bpmreadout" class="bpm-readout">${bpm}</div>
             <button id="up" class="nudge" aria-label="Increase tempo">+</button>
           </div>
-          <div class="sig">${sig}</div>
+          <div class="sig">${sig} <button id="subbtn" title="Subdivision">×${(s || state).sub}</button> <button id="voicebtn" title="Count beats out loud">voice ${(s || state).voice ? "●" : "○"}</button></div>
+          <div class="opts">
+            <button id="soundbtn" title="Click sound">♪ ${state.sound}</button>
+            <input id="vol" type="range" min="0" max="1" step="0.01" value="${state.vol}" title="Volume" />
+            <button id="countbtn" title="One-bar count-in before starting">count ${state.count ? "●" : "○"}</button>
+            <button id="flashbtn" title="Flash screen on beat 1">flash ${state.flash ? "●" : "○"}</button>
+          </div>
           <div id="leds"></div>
         </div>
         <div class="controls">
@@ -273,11 +382,46 @@
           <button id="tap" class="btn-tap">TAP</button>
         </div>`;
       document.getElementById("startstop").addEventListener("click", toggleClick);
-      const dn = document.getElementById("dn"), up = document.getElementById("up");
-      if (dn) dn.addEventListener("click", () => nudge(-1));
-      if (up) up.addEventListener("click", () => nudge(+1));
+      holdable(document.getElementById("dn"), (step) => nudge(-step));
+      holdable(document.getElementById("up"), (step) => nudge(+step));
+      document.getElementById("bpmreadout").addEventListener("click", editBpm);
       const tap = document.getElementById("tap");
       if (tap) tap.addEventListener("click", tapTempo);
+      document.getElementById("soundbtn").addEventListener("click", () => {
+        const keys = Object.keys(SOUNDS);
+        state.sound = keys[(keys.indexOf(state.sound) + 1) % keys.length];
+        save();
+        document.getElementById("soundbtn").textContent = `♪ ${state.sound}`;
+      });
+      document.getElementById("countbtn").addEventListener("click", () => {
+        state.count = !state.count;
+        save();
+        document.getElementById("countbtn").textContent = `count ${state.count ? "●" : "○"}`;
+      });
+      document.getElementById("flashbtn").addEventListener("click", () => {
+        state.flash = !state.flash;
+        save();
+        document.getElementById("flashbtn").textContent = `flash ${state.flash ? "●" : "○"}`;
+      });
+      const vol = document.getElementById("vol");
+      vol.addEventListener("input", () => {
+        state.vol = Number(vol.value);
+        if (audio.master) audio.master.gain.value = state.vol;
+      });
+      vol.addEventListener("change", save);
+      document.getElementById("subbtn").addEventListener("click", () => {
+        const t = currentSong() || state; // per-song when one is selected
+        t.sub = (t.sub % 4) + 1;
+        save();
+        document.getElementById("subbtn").textContent = `×${t.sub}`;
+      });
+      document.getElementById("voicebtn").addEventListener("click", () => {
+        const t = currentSong() || state;
+        t.voice = !t.voice;
+        if (!t.voice && "speechSynthesis" in window) speechSynthesis.cancel();
+        save();
+        document.getElementById("voicebtn").textContent = `voice ${t.voice ? "●" : "○"}`;
+      });
       renderLeds();
     }
 
@@ -286,8 +430,18 @@
       const beats = s ? s.sig.beats : 4;
       const el = document.getElementById("leds");
       if (!el) return;
+      const cls = ["mute", "", "down"]; // accent level → led class
+      const lvl = (i) => (s ? s.accents[i] : (i === 0 ? 2 : 1));
       el.innerHTML = Array.from({ length: beats }, (_, i) =>
-        `<div class="led${i === 0 ? " down" : ""}" data-i="${i}"></div>`).join("");
+        `<div class="led ${cls[lvl(i)]}" data-i="${i}" title="Tap: accent / mute / normal"></div>`).join("");
+      el.onclick = (e) => {
+        const led = e.target.closest(".led");
+        if (!led || !s) return;
+        const i = Number(led.dataset.i);
+        s.accents[i] = (s.accents[i] + 1) % 3; // 1 normal → 2 accent → 0 mute → 1
+        save();
+        renderLeds();
+      };
     }
 
     // --- Setlist ---
@@ -313,9 +467,8 @@
       const ed = editingId ? state.songs.find((s) => s.id === editingId) : null;
       const form = `<div class="addbar">
         <input name="name" placeholder="Song name" value="${ed ? escapeHtml(ed.name) : ""}" />
-        <input type="number" name="bpm" min="${BPM_MIN}" max="${BPM_MAX}" placeholder="BPM" value="${ed ? ed.bpm : ""}" />
-        <input type="number" name="beats" min="1" max="16" placeholder="beats" value="${ed ? ed.sig.beats : 4}" />
-        <input type="number" name="unit" min="1" max="16" placeholder="unit" value="${ed ? ed.sig.unit : 4}" />
+        <input type="number" inputmode="numeric" name="bpm" min="${BPM_MIN}" max="${BPM_MAX}" placeholder="BPM" value="${ed ? ed.bpm : ""}" />
+        <input name="sig" inputmode="decimal" placeholder="4.4" value="${ed ? `${ed.sig.beats}.${ed.sig.unit}` : "4.4"}" />
         <button class="primary" data-act="save">${ed ? "Save" : "Add"}</button>
       </div>`;
 
@@ -325,9 +478,10 @@
     function readForm() {
       const q = (n) => $setlist.querySelector(`[name=${n}]`);
       const name = (q("name").value || "").trim();
-      const bpm = clampBpm(Number(q("bpm").value));
-      const beats = Math.max(1, Math.min(16, Number(q("beats").value) || 4));
-      const unit = Math.max(1, Math.min(16, Number(q("unit").value) || 4));
+      const bpm = clampBpm(Number(q("bpm").value) || 120); // empty → 120, not BPM_MIN
+      const m = (q("sig").value || "").match(/^\s*(\d+)\s*[/.,]\s*(\d+)\s*$/);
+      const beats = Math.max(1, Math.min(16, m ? Number(m[1]) : 4));
+      const unit = Math.max(1, Math.min(16, m ? Number(m[2]) : 4));
       if (!name) return null;
       return { name, bpm, sig: { beats, unit } };
     }
@@ -338,7 +492,12 @@
       if (btn) {
         const act = btn.dataset.act, id = btn.dataset.id;
         if (act === "save") return onSave();
-        if (act === "edit") { editingId = id; renderSetlist(); return; }
+        if (act === "edit") {
+          editingId = id;
+          renderSetlist();
+          $setlist.querySelector(".addbar").scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
         if (act === "del") return onDelete(id);
         if (act === "up") return onMoveUp(id);
         return;
@@ -351,10 +510,10 @@
       if (!data) return;
       if (editingId) {
         const s = state.songs.find((x) => x.id === editingId);
-        if (s) Object.assign(s, data);
+        if (s) fixSong(Object.assign(s, data));
         editingId = null;
       } else {
-        const s = { id: uid(), ...data };
+        const s = fixSong({ id: uid(), ...data });
         state.songs.push(s);
         if (!state.currentId) selectSong(s.id);
       }
@@ -397,7 +556,48 @@
       if (!s) return;
       s.bpm = clampBpm(s.bpm + delta);
       save();
-      renderFace();
+      // Update the readout in place: a full renderFace would destroy the +/-
+      // button mid-hold and strand holdable's repeat interval.
+      const r = document.getElementById("bpmreadout");
+      if (r && !document.getElementById("bpmedit")) r.textContent = s.bpm;
+    }
+
+    // Press = one step; hold repeats, accelerating to 5-BPM steps after ~1.5s.
+    function holdable(btn, fn) {
+      let t = null, iv = null, reps = 0;
+      const stop = () => { clearTimeout(t); clearInterval(iv); };
+      btn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        btn.setPointerCapture(e.pointerId);
+        reps = 0;
+        fn(1);
+        t = setTimeout(() => { iv = setInterval(() => fn(++reps > 20 ? 5 : 1), 60); }, 400);
+      });
+      btn.addEventListener("pointerup", stop);
+      btn.addEventListener("pointercancel", stop);
+    }
+
+    // Tap the BPM number to type an exact tempo.
+    function editBpm() {
+      const s = currentSong();
+      if (!s || document.getElementById("bpmedit")) return;
+      const r = document.getElementById("bpmreadout");
+      r.innerHTML = `<input id="bpmedit" type="number" inputmode="numeric" min="${BPM_MIN}" max="${BPM_MAX}" value="${s.bpm}" />`;
+      const inp = document.getElementById("bpmedit");
+      inp.focus();
+      inp.select();
+      let done = false;
+      const finish = (commit) => {
+        if (done) return;
+        done = true;
+        if (commit && inp.value) { s.bpm = clampBpm(Number(inp.value)); save(); }
+        renderFace();
+      };
+      inp.addEventListener("blur", () => finish(true));
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") finish(true);
+        if (e.key === "Escape") finish(false);
+      });
     }
 
     function renderAll() { renderFace(); renderSetlist(); }
