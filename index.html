@@ -142,6 +142,7 @@
     const state = {
       songs: [],        // [{ id, name, bpm, sig:{beats,unit}, accents:[0|1|2] }]
       currentId: null,
+      bpm: 120,         // free-mode tempo when no song is selected (4/4 fixed)
       playing: false,
       sub: 1,           // clicks per beat: 1, 2 (8ths), 3 (triplets), 4 (16ths)
       voice: false,     // speak the beat count out loud
@@ -165,6 +166,7 @@
         state.currentId = saved.currentId || null;
       }
       if (saved && [1, 2, 3, 4].includes(saved.sub)) state.sub = saved.sub;
+      if (saved && typeof saved.bpm === "number") state.bpm = clampBpm(saved.bpm);
       if (saved) {
         state.voice = saved.voice === true;
         if (SOUNDS[saved.sound]) state.sound = saved.sound;
@@ -178,7 +180,7 @@
 
     function save() {
       store.set({
-        songs: state.songs, currentId: state.currentId, sub: state.sub, voice: state.voice,
+        songs: state.songs, currentId: state.currentId, bpm: state.bpm, sub: state.sub, voice: state.voice,
         sound: state.sound, vol: state.vol, count: state.count,
       });
     }
@@ -199,6 +201,7 @@
       ahead: 0.2,        // s — how far ahead to schedule (survives mobile timer throttling)
       timer: null,
       queue: [],         // [{time, beat}] for the visual loop
+      vqueue: [],        // [{time, beat}] for the voice count (fired early, see VOICE_LEAD)
     };
 
     function ensureCtx() {
@@ -216,6 +219,7 @@
       const ctx = audio.ctx;
       const song = currentSong();
       const beats = song ? song.sig.beats : 4;
+      if (isBeat) audio.vqueue.push({ time, beat: beat % beats });
       // Count-in ignores per-beat accents/mutes: plain bar, accented downbeat.
       const level = countIn || !song
         ? (beat % beats === 0 ? 2 : 1)
@@ -246,7 +250,7 @@
     function scheduler() {
       const ctx = audio.ctx;
       const song = currentSong();
-      const bpm = song ? song.bpm : 120;
+      const bpm = song ? song.bpm : state.bpm;
       const beats = song ? song.sig.beats : 4;
       const secondsPerBeat = 60 / bpm;
       const sub = song ? song.sub : state.sub;
@@ -276,12 +280,19 @@
 
     function startClick() {
       const ctx = ensureCtx();
-      if (!currentSong()) return;
+      const song = currentSong();
       audio.beat = 0;
       audio.subTick = 0;
-      audio.countLeft = state.count ? currentSong().sig.beats : 0;
+      audio.countLeft = state.count ? (song ? song.sig.beats : 4) : 0;
       audio.nextNoteTime = ctx.currentTime + 0.06;
       audio.queue.length = 0;
+      audio.vqueue.length = 0;
+      if ((song || state).voice && "speechSynthesis" in window) {
+        // warm up TTS so the first spoken count isn't late
+        const w = new SpeechSynthesisUtterance(" ");
+        w.volume = 0;
+        speechSynthesis.speak(w);
+      }
       state.playing = true;
       audio.timer = setInterval(scheduler, audio.lookahead);
       startVisualLoop();
@@ -294,6 +305,7 @@
       audio.timer = null;
       state.playing = false;
       audio.queue.length = 0;
+      audio.vqueue.length = 0;
       releaseWakeLock();
       renderFace();
     }
@@ -307,6 +319,12 @@
       const tick = () => {
         if (!state.playing) return;
         const now = audio.ctx.currentTime;
+        // Speak ahead of the beat: TTS has startup latency, so fire it early
+        // so the word lands on the click instead of trailing it.
+        while (audio.vqueue.length && audio.vqueue[0].time - VOICE_LEAD <= now) {
+          const v = audio.vqueue.shift();
+          if ((currentSong() || state).voice) speakCount(v.beat);
+        }
         while (audio.queue.length && audio.queue[0].time <= now) {
           const q = audio.queue.shift();
           lightBeat(q.beat, q.count);
@@ -316,6 +334,8 @@
       rafId = requestAnimationFrame(tick);
     }
 
+    // ponytail: fixed lead; TTS startup latency varies per device — make this a setting if it's still off
+    const VOICE_LEAD = 0.15; // s — how early to fire speech so the word lands on the beat
     const COUNT_WORDS = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen".split(" ");
     function speakCount(beat) {
       if (!("speechSynthesis" in window)) return;
@@ -326,7 +346,6 @@
     }
 
     function lightBeat(beat, isCount) {
-      if ((currentSong() || state).voice) speakCount(beat);
       const leds = document.querySelectorAll("#leds .led");
       leds.forEach((l) => l.classList.remove("on", "count"));
       const led = leds[beat];
@@ -346,9 +365,9 @@
     const $face = document.getElementById("face");
     function renderFace() {
       const s = currentSong();
-      const bpm = s ? s.bpm : "--";
-      const name = s ? escapeHtml(s.name) : "No song selected";
-      const sig = s ? `${s.sig.beats} / ${s.sig.unit}` : "– / –";
+      const bpm = s ? s.bpm : state.bpm;
+      const name = s ? escapeHtml(s.name) : "Free click";
+      const sig = s ? `${s.sig.beats} / ${s.sig.unit}` : "4 / 4";
       $face.innerHTML = `
         <div class="display panel">
           <div class="now-playing">${name}</div>
@@ -535,8 +554,7 @@
     }
 
     function nudge(delta) {
-      const s = currentSong();
-      if (!s) return;
+      const s = currentSong() || state; // free mode nudges state.bpm
       s.bpm = clampBpm(s.bpm + delta);
       save();
       // Update the readout in place: a full renderFace would destroy the +/-
@@ -562,8 +580,8 @@
 
     // Tap the BPM number to type an exact tempo.
     function editBpm() {
-      const s = currentSong();
-      if (!s || document.getElementById("bpmedit")) return;
+      const s = currentSong() || state;
+      if (document.getElementById("bpmedit")) return;
       const r = document.getElementById("bpmreadout");
       r.innerHTML = `<input id="bpmedit" type="number" inputmode="numeric" min="${BPM_MIN}" max="${BPM_MAX}" value="${s.bpm}" />`;
       const inp = document.getElementById("bpmedit");
@@ -599,8 +617,8 @@
         for (let i = 1; i < tapTimes.length; i++) sum += tapTimes[i] - tapTimes[i - 1];
         const avgMs = sum / (tapTimes.length - 1);
         const bpm = clampBpm(60000 / avgMs);
-        const s = currentSong();
-        if (s) { s.bpm = bpm; save(); renderFace(); }
+        const s = currentSong() || state;
+        s.bpm = bpm; save(); renderFace();
       }
     }
 
