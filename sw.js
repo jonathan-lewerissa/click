@@ -1,4 +1,4 @@
-const CACHE = "click-v6";
+const CACHE = "click-v7";
 const SHELL = [
   "./",
   "./index.html",
