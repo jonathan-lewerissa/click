@@ -44,8 +44,6 @@
     .opts input[type=range] { width:90px; accent-color:var(--amber); }
     #bpmedit { width:200px; background:none; border:none; border-bottom:2px solid var(--amber); color:var(--amber); font-family:var(--mono); font-size:72px; font-weight:700; text-align:center; outline:none; }
     #bpmedit::-webkit-outer-spin-button, #bpmedit::-webkit-inner-spin-button { -webkit-appearance:none; }
-    #flashoverlay { position:fixed; inset:0; background:var(--red); opacity:0; pointer-events:none; }
-    #flashoverlay.show { opacity:.3; }
     #leds { display:flex; gap:14px; justify-content:center; min-height:24px; margin-top:6px; }
     .led { width:24px; height:24px; border-radius:50%; background:var(--amber-dim); box-shadow:inset 0 2px 4px rgba(0,0,0,.5); transition:background-color .05s, box-shadow .05s; cursor:pointer; }
     .led.down { background:var(--red-dim); }
@@ -86,7 +84,6 @@
       <section id="setlist" class="panel" style="flex:1;overflow:auto;padding:16px;"></section>
     </main>
   </div>
-  <div id="flashoverlay"></div>
 
   <script>
     "use strict";
@@ -151,7 +148,6 @@
       voice: false,     // speak the beat count out loud
       sound: "beep",    // key into SOUNDS
       vol: 1,           // master volume 0..1
-      flash: false,     // flash the screen on beat 1
       count: false,     // one-bar count-in before starting
     };
 
@@ -174,7 +170,6 @@
         state.voice = saved.voice === true;
         if (SOUNDS[saved.sound]) state.sound = saved.sound;
         if (typeof saved.vol === "number") state.vol = Math.max(0, Math.min(1, saved.vol));
-        state.flash = saved.flash === true;
         state.count = saved.count === true;
       }
       if (state.currentId && !state.songs.some((s) => s.id === state.currentId)) {
@@ -185,7 +180,7 @@
     function save() {
       store.set({
         songs: state.songs, currentId: state.currentId, sub: state.sub, voice: state.voice,
-        sound: state.sound, vol: state.vol, flash: state.flash, count: state.count,
+        sound: state.sound, vol: state.vol, count: state.count,
       });
     }
 
@@ -341,11 +336,6 @@
         if (isCount) led.classList.add("count"); // count-in flashes white
         setTimeout(() => led.classList.remove("on", "count"), 90);
       }
-      if (state.flash && beat === 0) {
-        const f = document.getElementById("flashoverlay");
-        f.classList.add("show");
-        setTimeout(() => f.classList.remove("show"), 90);
-      }
       const readout = document.getElementById("bpmreadout");
       if (readout) {
         readout.style.transform = "scale(1.06)";
@@ -373,7 +363,6 @@
             <button id="soundbtn" title="Click sound">♪ ${state.sound}</button>
             <input id="vol" type="range" min="0" max="1" step="0.01" value="${state.vol}" title="Volume" />
             <button id="countbtn" title="One-bar count-in before starting">count ${state.count ? "●" : "○"}</button>
-            <button id="flashbtn" title="Flash screen on beat 1">flash ${state.flash ? "●" : "○"}</button>
           </div>
           <div id="leds"></div>
         </div>
@@ -397,11 +386,6 @@
         state.count = !state.count;
         save();
         document.getElementById("countbtn").textContent = `count ${state.count ? "●" : "○"}`;
-      });
-      document.getElementById("flashbtn").addEventListener("click", () => {
-        state.flash = !state.flash;
-        save();
-        document.getElementById("flashbtn").textContent = `flash ${state.flash ? "●" : "○"}`;
       });
       const vol = document.getElementById("vol");
       vol.addEventListener("input", () => {
