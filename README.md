@@ -53,14 +53,15 @@ Keep every file in the **same folder**; all paths are relative.
 ```
 click-pwa/
 ├── index.html            # the entire app: markup, styles, logic
-├── manifest.webmanifest  # installability (name, icons, theme)
+├── manifest.webmanifest  # installability (name, inline SVG icon, theme)
 ├── sw.js                 # service worker — cache-first app shell (offline)
-├── icon-192.png          # home-screen icon
-├── icon-512.png          # home-screen icon
-├── icon-maskable.png     # Android maskable icon
-├── apple-touch-icon.png  # iOS icon
+├── wrangler.jsonc        # Cloudflare Workers static-assets config
 └── README.md
 ```
+
+No icon files: the manifest and favicon both use one inline SVG data URI. Chrome/Android
+is happy with that; **iOS ignores it** and screenshots the page for the home-screen icon
+instead. Add a real `apple-touch-icon.png` if that bothers you.
 
 ## Architecture notes
 
@@ -68,13 +69,20 @@ click-pwa/
   clicks landing within the next 100 ms using the Web Audio clock
   (`audioContext.currentTime`). This decouples imprecise JS timers from sample-accurate
   audio, so the click never drifts. See `scheduler()` / `scheduleClick()`.
-- **Click sound.** Triangle oscillator with a fast exponential envelope (~35 ms).
-  Downbeat = 1760 Hz and louder; other beats = 1108 Hz. Tweak in `scheduleClick()`.
+- **Click sound.** Three presets (`beep` / `wood` / `low`) in the `SOUNDS` table — waveform,
+  down/beat/sub frequencies, decay, loudness trim. Master volume rides an `audio.master`
+  gain node. Tweak in `SOUNDS` / `scheduleClick()`.
+- **Beats.** Per-beat accent levels (tap an LED: normal → accent → mute), subdivisions
+  ×1–×4, optional spoken beat count (`speechSynthesis`, fired `VOICE_LEAD` early), and a
+  one-bar count-in. Subdivision/voice are per-song when a song is loaded, otherwise global.
+- **Free mode.** With no song selected the metronome runs on `state.bpm` at 4/4 — start it
+  without a setlist.
 - **Visual sync.** A `requestAnimationFrame` loop reads a queue of scheduled beats and
   lights the LED row / pulses the readout exactly when each click sounds.
 - **Storage abstraction.** `store.get/set` prefers `window.storage` (Anthropic artifact
   sandbox), falls back to `localStorage` (hosted), then in-memory. Persisted under key
-  `clicklist_v1` as `{ songs: [{id,name,bpm,sig}], currentId }`.
+  `clicklist_v1` as `{ songs: [{id,name,bpm,sig,accents,sub,voice}], currentId, bpm, sub,
+  voice, sound, vol, count }`.
 - **Wake Lock.** `navigator.wakeLock` keeps the screen on while playing; re-acquired on
   tab refocus. Toggle in the top-right.
 - **Keyboard.** `space` start/stop · `←/→` change song · `↑/↓` tempo · `T` tap tempo.
@@ -91,14 +99,15 @@ click-pwa/
 
 ## Roadmap / next tasks
 
-- [ ] Count-in (1 bar of clicks before the "song" starts)
-- [ ] Sub-divisions (8th / 16th note clicks) and custom accent patterns
+- [x] Count-in (1 bar of clicks before the "song" starts)
+- [x] Sub-divisions (8th / triplet / 16th clicks) and per-beat accent/mute
+- [x] Settings: click sound choice, volume
+- [ ] Real `apple-touch-icon.png` (iOS ignores the inline SVG icon)
 - [ ] Per-song notes field (key, cues, lyrics snippet)
 - [ ] Multiple named setlists; export/import as JSON
 - [ ] Reorder by drag (currently ▲ move-up only)
 - [ ] PWA update prompt when a new service worker is waiting
 - [ ] Optional MIDI / footswitch to advance songs hands-free
-- [ ] Settings: click sound choice, accent on/off, default volume
 
 ## Live-use gotchas
 

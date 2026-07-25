@@ -8,3 +8,6 @@ click-refresh.png
 !.dev.vars.example
 .env*
 !.env.example
+
+# macOS
+.DS_Store

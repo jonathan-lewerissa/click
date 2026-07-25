@@ -306,6 +306,7 @@
       state.playing = false;
       audio.queue.length = 0;
       audio.vqueue.length = 0;
+      if ("speechSynthesis" in window) speechSynthesis.cancel(); // don't trail a spoken count past STOP
       releaseWakeLock();
       renderFace();
     }
