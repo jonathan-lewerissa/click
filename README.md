@@ -2,8 +2,6 @@
 
 A setlist metronome for live music. Build a list of songs (name + BPM), tap one to load its tempo, hit **Start**. Switch songs and the click follows — even mid-play.
 
----
-
 ## Features
 
 - **Setlist** — each song has a name, BPM, time signature and free-text notes (key, cues, lyric snippet); tap one to load its tempo instantly, even mid-play. Drag the ⠿ grip to reorder. Persists on the device.
@@ -14,14 +12,10 @@ A setlist metronome for live music. Build a list of songs (name + BPM), tap one 
 - **Sound settings** — three click voices (beep / wood / low) and master volume.
 - **Stage-ready** — dark LED-style readout, wake lock to keep the screen on, installable and fully offline as a PWA.
 
----
-
 ## Install to home screen
 
 - **Android/Chrome:** menu → "Install app" / "Add to Home screen".
 - **iPhone/Safari:** Share → "Add to Home Screen", then launch from that icon so it runs full-screen and the screen-lock toggle works.
-
----
 
 ## Roadmap / next tasks
 
@@ -39,6 +33,6 @@ A setlist metronome for live music. Build a list of songs (name + BPM), tap one 
 
 Issues and PRs welcome. Read [ARCHITECTURE.md](ARCHITECTURE.md) first — it covers how the click engine works and the house rules (no framework, no bundler, everything stays in `index.html`). Test on a phone, not just desktop; audio timing and wake lock behave differently there.
 
----
+## License
 
 MIT © Jonathan Rehuel Lewerissa
