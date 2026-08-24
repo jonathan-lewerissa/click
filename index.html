@@ -35,6 +35,7 @@
     /* Metronome display */
     .display { padding:24px 16px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
     .now-playing { font-size:1.5rem; color:var(--text); min-height:2rem; }
+    .now-playing .note { display:block; font-family:var(--mono); font-size:.85rem; color:var(--dim); }
     .bpm-row { display:flex; align-items:center; justify-content:center; gap:16px; }
     .bpm-readout { font-family:var(--mono); font-size:96px; line-height:1; color:var(--amber); font-weight:700; text-shadow:0 0 20px rgba(255,176,0,.2); transition:transform .05s; cursor:pointer; }
     .nudge { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; width:48px; height:48px; font-size:26px; cursor:pointer; }
@@ -65,12 +66,18 @@
     .song { display:flex; align-items:center; gap:10px; padding:12px 14px; background:var(--bg); margin-bottom:8px; border-radius:6px; border-left:4px solid transparent; cursor:pointer; }
     .song.active { border-left-color:var(--amber); background:#222; }
     .song .nm { flex:1; font-size:18px; }
+    .song .note { display:block; font-family:var(--mono); font-size:13px; color:var(--dim); }
+    .song .grip { padding:4px 6px; border:none; font-size:15px; cursor:grab; touch-action:none; }
+    .song.dragging { opacity:.5; }
+    .song.dropbefore { box-shadow:inset 0 3px 0 var(--amber); }
+    .song.dropafter  { box-shadow:inset 0 -3px 0 var(--amber); }
     .song .meta { font-family:var(--mono); color:var(--dim); font-size:14px; }
     .song button { background:none; border:1px solid var(--border); color:var(--dim); border-radius:6px; padding:4px 8px; font-size:13px; cursor:pointer; }
     .empty { color:var(--dim); text-align:center; padding:40px 18px; font-size:16px; }
     .addbar { display:flex; flex-wrap:wrap; gap:8px; padding:14px 0 4px; margin-top:10px; border-top:1px dashed var(--border); align-items:center; }
     .addbar input { background:var(--bg); border:1px solid #444; color:var(--text); border-radius:6px; padding:8px; font-family:var(--mono); font-size:14px; }
     .addbar input[name=name]{ flex:1; min-width:120px; }
+    .addbar input[name=notes]{ flex:1 0 100%; }
     .addbar input[type=number], .addbar input[name=sig]{ width:64px; }
     .addbar .primary { background:#444; color:#fff; border:none; font-weight:700; border-radius:6px; padding:9px 14px; cursor:pointer; font-family:var(--display); }
   </style>
@@ -140,7 +147,7 @@
     };
 
     const state = {
-      songs: [],        // [{ id, name, bpm, sig:{beats,unit}, accents:[0|1|2] }]
+      songs: [],        // [{ id, name, bpm, sig:{beats,unit}, accents:[0|1|2], notes }]
       currentId: null,
       bpm: 120,         // free-mode tempo when no song is selected (4/4 fixed)
       playing: false,
@@ -158,6 +165,7 @@
           id: s.id || uid(),
           name: String(s.name || "Untitled"),
           bpm: clampBpm(s.bpm),
+          notes: String(s.notes || ""),
           sig: { beats: (s.sig && s.sig.beats) || 4, unit: (s.sig && s.sig.unit) || 4 },
           accents: s.accents,
           sub: s.sub,
@@ -367,7 +375,8 @@
     function renderFace() {
       const s = currentSong();
       const bpm = s ? s.bpm : state.bpm;
-      const name = s ? escapeHtml(s.name) : "Free click";
+      const name = (s ? escapeHtml(s.name) : "Free click")
+        + (s && s.notes ? `<span class="note">${escapeHtml(s.notes)}</span>` : "");
       const sig = s ? `${s.sig.beats} / ${s.sig.unit}` : "4 / 4";
       $face.innerHTML = `
         <div class="display panel">
@@ -455,9 +464,9 @@
       const rows = state.songs.map((s) => {
         const active = s.id === state.currentId ? " active" : "";
         return `<div class="song${active}" data-id="${s.id}">
-          <span class="nm">${escapeHtml(s.name)}</span>
+          <button class="grip" title="Drag to reorder" aria-label="Drag to reorder">⠿</button>
+          <span class="nm">${escapeHtml(s.name)}${s.notes ? `<span class="note">${escapeHtml(s.notes)}</span>` : ""}</span>
           <span class="meta">${s.bpm} · ${s.sig.beats}/${s.sig.unit}</span>
-          <button data-act="up" data-id="${s.id}" title="Move up">▲</button>
           <button data-act="edit" data-id="${s.id}">Edit</button>
           <button data-act="del" data-id="${s.id}">✕</button>
         </div>`;
@@ -473,6 +482,7 @@
         <input type="number" inputmode="numeric" name="bpm" min="${BPM_MIN}" max="${BPM_MAX}" placeholder="BPM" value="${ed ? ed.bpm : ""}" />
         <input name="sig" inputmode="decimal" placeholder="4.4" value="${ed ? `${ed.sig.beats}.${ed.sig.unit}` : "4.4"}" />
         <button class="primary" data-act="save">${ed ? "Save" : "Add"}</button>
+        <input name="notes" placeholder="Notes — key, cues, lyric snippet" value="${ed ? escapeHtml(ed.notes) : ""}" />
       </div>`;
 
       $setlist.innerHTML = `<div class="setlist-title">SETLIST</div>` + list + form;
@@ -486,10 +496,11 @@
       const beats = Math.max(1, Math.min(16, m ? Number(m[1]) : 4));
       const unit = Math.max(1, Math.min(16, m ? Number(m[2]) : 4));
       if (!name) return null;
-      return { name, bpm, sig: { beats, unit } };
+      return { name, bpm, sig: { beats, unit }, notes: (q("notes").value || "").trim() };
     }
 
     $setlist.addEventListener("click", (e) => {
+      if (dragged) return; // tail of a reorder drag, not a tap
       const btn = e.target.closest("button");
       const row = e.target.closest(".song");
       if (btn) {
@@ -502,7 +513,6 @@
           return;
         }
         if (act === "del") return onDelete(id);
-        if (act === "up") return onMoveUp(id);
         return;
       }
       if (row) selectSong(row.dataset.id);
@@ -535,13 +545,54 @@
       save(); renderAll();
     }
 
-    function onMoveUp(id) {
-      const i = state.songs.findIndex((s) => s.id === id);
-      if (i > 0) {
-        [state.songs[i - 1], state.songs[i]] = [state.songs[i], state.songs[i - 1]];
-        save(); renderAll();
-      }
-    }
+    // Drag a row's grip to reorder. Pointer events, not HTML5 drag-and-drop —
+    // that one never fires on touch, and this is a phone-first app. A touch
+    // pointer captures implicitly, so the moves keep arriving on the grip.
+    let dragged = false;
+    $setlist.addEventListener("pointerdown", (e) => {
+      const grip = e.target.closest(".grip");
+      if (!grip) return;
+      e.preventDefault();
+      const row = grip.closest(".song");
+      const from = state.songs.findIndex((s) => s.id === row.dataset.id);
+      if (from < 0) return;
+      row.classList.add("dragging");
+      grip.setPointerCapture(e.pointerId);
+      let to = from, moved = false;
+
+      const move = (ev) => {
+        moved = true;
+        $setlist.querySelectorAll(".song").forEach((r) => r.classList.remove("dropbefore", "dropafter"));
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const over = el && el.closest(".song");
+        if (!over || over === row) { to = from; return; }
+        const box = over.getBoundingClientRect();
+        const after = ev.clientY > box.top + box.height / 2;
+        over.classList.add(after ? "dropafter" : "dropbefore");
+        const i = state.songs.findIndex((s) => s.id === over.dataset.id);
+        to = after ? i + 1 : i;
+        if (to > from) to--; // the dragged song is spliced out first
+      };
+
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        grip.removeEventListener("pointercancel", up);
+        row.classList.remove("dragging");
+        if (!moved) return;
+        dragged = true;
+        setTimeout(() => { dragged = false; }, 0);
+        if (to !== from) {
+          state.songs.splice(to, 0, state.songs.splice(from, 1)[0]);
+          save();
+        }
+        renderAll();
+      };
+
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+    });
 
     function selectSong(id) {
       state.currentId = id;

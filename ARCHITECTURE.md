@@ -9,7 +9,8 @@ How `index.html` is put together, and the rules for changing it.
 - **Beats.** Per-beat accent levels (tap an LED: normal → accent → mute), subdivisions ×1–×4, optional spoken beat count (`speechSynthesis`, fired `VOICE_LEAD` early), and a one-bar count-in. Subdivision/voice are per-song when a song is loaded, otherwise global.
 - **Free mode.** With no song selected the metronome runs on `state.bpm` at 4/4 — start it without a setlist.
 - **Visual sync.** A `requestAnimationFrame` loop reads a queue of scheduled beats and lights the LED row / pulses the readout exactly when each click sounds.
-- **Storage abstraction.** `store.get/set` prefers `window.storage` (Anthropic artifact sandbox), falls back to `localStorage` (hosted), then in-memory. Persisted under key `clicklist_v1` as `{ songs: [{id,name,bpm,sig,accents,sub,voice}], currentId, bpm, sub, voice, sound, vol, count }`.
+- **Storage abstraction.** `store.get/set` prefers `window.storage` (Anthropic artifact sandbox), falls back to `localStorage` (hosted), then in-memory. Persisted under key `clicklist_v1` as `{ songs: [{id,name,bpm,sig,notes,accents,sub,voice}], currentId, bpm, sub, voice, sound, vol, count }`.
+- **Setlist order.** Drag a row's ⠿ grip to reorder. Pointer events, not HTML5 drag-and-drop — the latter never fires on touch. The drop position is drawn as an amber line on the hovered row and only committed to `state.songs` on release.
 - **Wake Lock.** `navigator.wakeLock` keeps the screen on while playing; re-acquired on tab refocus. Toggle in the top-right.
 - **Keyboard.** `space` start/stop · `←/→` change song · `↑/↓` tempo · `T` tap tempo.
 

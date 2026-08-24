@@ -6,7 +6,7 @@ A setlist metronome for live music. Build a list of songs (name + BPM), tap one 
 
 ## Features
 
-- **Setlist** — each song has a name, BPM and time signature; tap one to load its tempo instantly, even mid-play. Persists on the device.
+- **Setlist** — each song has a name, BPM, time signature and free-text notes (key, cues, lyric snippet); tap one to load its tempo instantly, even mid-play. Drag the ⠿ grip to reorder. Persists on the device.
 - **Drift-free click** — Web Audio look-ahead scheduler, so a long set stays in time.
 - **Free mode** — start the metronome with no song selected.
 - **Beat control** — per-beat accent/mute, subdivisions ×1–×4, one-bar count-in, and an optional spoken beat count.
@@ -26,9 +26,7 @@ A setlist metronome for live music. Build a list of songs (name + BPM), tap one 
 ## Roadmap / next tasks
 
 - [ ] Real `apple-touch-icon.png` (iOS ignores the inline SVG icon)
-- [ ] Per-song notes field (key, cues, lyrics snippet)
 - [ ] Multiple named setlists; export/import as JSON
-- [ ] Reorder by drag (currently ▲ move-up only)
 - [ ] PWA update prompt when a new service worker is waiting
 - [ ] Optional MIDI / footswitch to advance songs hands-free
 
